@@ -713,8 +713,59 @@ void jl_print_bt_entry_codeloc(jl_bt_element_t *bt_entry) JL_NOTSAFEPOINT
     }
 }
 
+extern bt_context_t *jl_to_bt_context(void *sigctx);
+
+void jl_rec_backtrace(jl_task_t *t)
+{
+    jl_ptls_t ptls = jl_get_ptls_states();
+    ptls->bt_size = 0;
+    if (t == ptls->current_task) {
+        ptls->bt_size = rec_backtrace(ptls->bt_data, JL_MAX_BT_SIZE, 0);
+        return;
+    }
+    if (t->copy_stack || !t->started || t->stkbuf == NULL)
+        return;
+    int old = jl_atomic_compare_exchange(&t->tid, -1, ptls->tid);
+    if (old != -1 && old != ptls->tid)
+        return;
+    bt_context_t *context = NULL;
+#if defined(_OS_WINDOWS_)
+    bt_context_t c;
+    memset(&c, 0, sizeof(c));
+    _JUMP_BUFFER *mctx = (_JUMP_BUFFER*)&t->ctx.uc_mcontext;
+#if defined(_CPU_X86_64_)
+    c.Rbx = mctx->Rbx;
+    c.Rsp = mctx->Rsp;
+    c.Rbp = mctx->Rbp;
+    c.Rsi = mctx->Rsi;
+    c.Rdi = mctx->Rdi;
+    c.R12 = mctx->R12;
+    c.R13 = mctx->R13;
+    c.R14 = mctx->R14;
+    c.R15 = mctx->R15;
+    c.Rip = mctx->Rip;
+    memcpy(&c.Xmm6, &mctx->Xmm6, 10 * sizeof(mctx->Xmm6)); // Xmm6-Xmm15
+#else
+    c.Eip = mctx->Eip;
+    c.Esp = mctx->Esp;
+    c.Ebp = mctx->Ebp;
+#endif
+    context = &c;
+#elif defined(JL_HAVE_UNW_CONTEXT)
+    context = &t->ctx;
+#elif defined(JL_HAVE_UCONTEXT)
+    context = jl_to_bt_context(&t->ctx);
+#else
+#endif
+    if (context)
+        ptls->bt_size = rec_backtrace_ctx(ptls->bt_data, JL_MAX_BT_SIZE, context, t->gcstack, 0);
+    if (old == -1)
+        jl_atomic_store_relaxed(&t->tid, old);
+}
+
 //--------------------------------------------------
 // Tools for interactive debugging in gdb
+
 JL_DLLEXPORT void jl_gdblookup(void* ip)
 {
     jl_print_native_codeloc((uintptr_t)ip);
@@ -726,9 +777,19 @@ JL_DLLEXPORT void jlbacktrace(void) JL_NOTSAFEPOINT
     jl_excstack_t *s = jl_get_ptls_states()->current_task->excstack;
     if (!s)
         return;
-    size_t bt_size = jl_excstack_bt_size(s, s->top);
+    size_t i, bt_size = jl_excstack_bt_size(s, s->top);
     jl_bt_element_t *bt_data = jl_excstack_bt_data(s, s->top);
-    for (size_t i = 0; i < bt_size; i += jl_bt_entry_size(bt_data + i)) {
+    for (i = 0; i < bt_size; i += jl_bt_entry_size(bt_data + i)) {
+        jl_print_bt_entry_codeloc(bt_data + i);
+    }
+}
+JL_DLLEXPORT void jlbacktracet(jl_task_t *t)
+{
+    jl_ptls_t ptls = jl_get_ptls_states();
+    jl_rec_backtrace(t);
+    size_t i, bt_size = ptls->bt_size;
+    jl_bt_element_t *bt_data = ptls->bt_data;
+    for (i = 0; i < bt_size; i += jl_bt_entry_size(bt_data + i)) {
         jl_print_bt_entry_codeloc(bt_data + i);
     }
 }
