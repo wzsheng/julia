@@ -2586,3 +2586,6 @@ f() = _foldl_iter(step, (Missing[],), [0.0], 1)
 end
 @test Core.Compiler.typesubtract(Tuple{Union{Int,Char}}, Tuple{Char}) == Tuple{Int}
 @test Base.return_types(Issue35566.f) == [Val{:expected}]
+
+f_inf_error_bottom(x::Vector) = isempty(x) ? error(x[1]) : x
+Core.Compiler.return_type(f_inf_error_bottom, Tuple{Vector{Any}}) == Vector{Any}
