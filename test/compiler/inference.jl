@@ -2588,4 +2588,4 @@ end
 @test Base.return_types(Issue35566.f) == [Val{:expected}]
 
 f_inf_error_bottom(x::Vector) = isempty(x) ? error(x[1]) : x
-Core.Compiler.return_type(f_inf_error_bottom, Tuple{Vector{Any}}) == Vector{Any}
+@test Core.Compiler.return_type(f_inf_error_bottom, Tuple{Vector{Any}}) == Vector{Any}
