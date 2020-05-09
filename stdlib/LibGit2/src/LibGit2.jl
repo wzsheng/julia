@@ -961,7 +961,7 @@ end
 function ensure_initialized()
     x = Threads.atomic_cas!(REFCOUNT, 0, 1)
     if x < 0
-        negative_refcount_error(x)::Union{}
+        negative_refcount_error(x)
     end
     if x == 0
         initialize()
