@@ -637,7 +637,7 @@ struct LogicalIndex{T, A<:AbstractArray{Bool}} <: AbstractVector{T}
 end
 LogicalIndex(mask::AbstractVector{Bool}) = LogicalIndex{Int, typeof(mask)}(mask)
 LogicalIndex(mask::AbstractArray{Bool, N}) where {N} = LogicalIndex{CartesianIndex{N}, typeof(mask)}(mask)
-(::Type{LogicalIndex{Int}})(mask::AbstractArray) = LogicalIndex{Int, typeof(mask)}(mask)
+LogicalIndex{Int}(mask::AbstractArray) = LogicalIndex{Int, typeof(mask)}(mask)
 size(L::LogicalIndex) = (L.sum,)
 length(L::LogicalIndex) = L.sum
 collect(L::LogicalIndex) = [i for i in L]
@@ -847,6 +847,10 @@ function diff(a::AbstractArray{T,N}; dims::Integer) where {T,N}
     r1 = ntuple(i -> i == dims ? UnitRange(2, last(r[i])) : UnitRange(r[i]), N)
 
     return view(a, r1...) .- view(a, r0...)
+end
+function diff(r::AbstractRange{T}; dims::Integer=1) where {T}
+    dims == 1 || throw(ArgumentError("dimension $dims out of range (1:1)"))
+    return T[@inbounds r[i+1] - r[i] for i in firstindex(r):lastindex(r)-1]
 end
 
 ### from abstractarray.jl

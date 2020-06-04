@@ -4708,6 +4708,11 @@ let ft = Base.datatype_fieldtypes
     @test !isdefined(ft(B12238.body.body)[1], :instance)  # has free type vars
 end
 
+# `where` syntax in constructor definitions
+(A12238{T} where T<:Real)(x) = 0
+@test A12238{<:Real}(0) == 0
+@test_throws MethodError A12238{<:Integer}(0)
+
 # issue #16315
 let a = Any[]
     @noinline f() = a[end]
@@ -5959,6 +5964,16 @@ struct A33709
 end
 let a33709 = A33709(A33709(nothing))
     @test isnothing(a33709.a.a)
+end
+
+# issue #35793
+struct A35793
+    x::Union{Nothing, Missing}
+end
+let x = A35793(nothing), y = A35793(missing)
+    @test x isa A35793
+    @test x.x === nothing
+    @test y.x === missing
 end
 
 # issue 31583
