@@ -179,12 +179,13 @@ end
 ## package identification: determine unique identity of package to be loaded ##
 
 # Used by Pkg but not used in loading itself
-function find_package(arg)
-    cache = TOMLCache()
-    pkg = identify_package(arg, cache)
+find_package(name::String, cache::TOMLCache = TOMLCache()) = find_package(PkgId(""), name, cache) # `where` without a uuid will be ignored
+function find_package(where::Union{Module,PkgId}, name::String, cache::TOMLCache = TOMLCache())
+    pkg = identify_package(where, name, cache)
     pkg === nothing && return nothing
     return locate_package(pkg, cache)
 end
+
 
 ## package identity: given a package name and a context, try to return its identity ##
 identify_package(where::Module, name::String, cache::TOMLCache = TOMLCache()) = identify_package(PkgId(where), name, cache)
@@ -213,6 +214,29 @@ function identify_package(name::String, cache::TOMLCache=TOMLCache())::Union{Not
     return nothing
 end
 
+# identify_package computes the list of packages that can be loaded by where
+function identify_package_deps(where::PkgId, cache::TOMLCache=TOMLCache())::Vector{PkgId}
+    where.uuid === nothing && return identify_package_deps(cache)
+    deps = PkgId[]
+    for env in load_path()
+        deps = manifest_deps_list(env, where, cache)
+        deps === nothing || return deps # found--return it
+    end
+    return PkgId[where]
+end
+
+# identify_package lists all packages that can be loaded from any toplevel context
+# by looking through the Project.toml files and directories
+function identify_package_deps(cache::TOMLCache=TOMLCache())::Vector{PkgId}
+    deps = PkgId[]
+    for env in load_path()
+        add = project_deps_list(env, cache)
+        add === nothing || append!(deps, add)
+    end
+    return deps
+end
+
+
 ## package location: given a package identity, find file to load ##
 function locate_package(pkg::PkgId, cache::TOMLCache=TOMLCache())::Union{Nothing,String}
     if pkg.uuid === nothing
@@ -227,7 +251,7 @@ function locate_package(pkg::PkgId, cache::TOMLCache=TOMLCache())::Union{Nothing
                 return implicit_manifest_uuid_path(env, pkg, cache)
             end
             @assert found.uuid !== nothing
-            return locate_package(found, cache) # restart search now that we know the uuid for pkg
+            return locate_package(found, cache) # restart search now that we know the uuid for pkg (TODO: the existence of this line of code is probably a bug)
         end
     else
         for env in load_path()
@@ -301,6 +325,17 @@ function project_deps_get(env::String, name::String, cache::TOMLCache)::Union{No
     return nothing
 end
 
+function project_deps_list(env::String, cache::TOMLCache)::Union{Nothing,Vector{PkgId}}
+    project_file = env_project_file(env)
+    if project_file isa String
+        return explicit_project_deps_list(project_file, cache)
+    elseif project_file
+        return implicit_project_deps_list(env, cache)
+    end
+    return nothing
+end
+
+
 function manifest_deps_get(env::String, where::PkgId, name::String, cache::TOMLCache)::Union{Nothing,PkgId}
     @assert where.uuid !== nothing
     project_file = env_project_file(env)
@@ -313,13 +348,33 @@ function manifest_deps_get(env::String, where::PkgId, name::String, cache::TOMLC
             return PkgId(pkg_uuid, name)
         end
         # look for manifest file and `where` stanza
-        return explicit_manifest_deps_get(project_file, where.uuid, name, cache)
+        return explicit_manifest_deps_get(project_file, where, name, cache)
     elseif project_file
         # if env names a directory, search it
         return implicit_manifest_deps_get(env, where, name, cache)
     end
     return nothing
 end
+
+function manifest_deps_list(env::String, where::PkgId, cache::TOMLCache)::Union{Nothing,Vector{PkgId}}
+    @assert where.uuid !== nothing
+    project_file = env_project_file(env)
+    if project_file isa String
+        # first check if `where` names the Project itself
+        proj = project_file_name_uuid(project_file, where.name, cache)
+        if proj == where
+            # if `where` matches the project, use [deps] section as manifest, and stop searching
+            return explicit_project_deps_list(project_file, cache)
+        end
+        # look for manifest file and `where` stanza
+        return explicit_manifest_deps_list(project_file, where, cache)
+    elseif project_file
+        # if env names a directory, search it
+        return implicit_manifest_deps_list(env, where, cache)
+    end
+    return nothing
+end
+
 
 function manifest_uuid_path(env::String, pkg::PkgId, cache::TOMLCache)::Union{Nothing,String}
     project_file = env_project_file(env)
@@ -340,10 +395,9 @@ end
 
 # find project file's top-level UUID entry (or nothing)
 function project_file_name_uuid(project_file::String, name::String, cache::TOMLCache)::PkgId
-    uuid = dummy_uuid(project_file)
     d = parsed_toml(cache, project_file)
     uuid′ = get(d, "uuid", nothing)::Union{String, Nothing}
-    uuid′ === nothing || (uuid = UUID(uuid′))
+    uuid = uuid′ === nothing ? dummy_uuid(project_file) : UUID(uuid′)
     name = get(d, "name", name)::String
     return PkgId(uuid, name)
 end
@@ -371,6 +425,7 @@ end
 
 # given a directory (implicit env from LOAD_PATH) and a name,
 # check if it is an implicit package
+# TODO: aren't we supposed to first check for the Project file first and see if it declares a path?
 function entry_point_and_project_file_inside(dir::String, name::String)::Union{Tuple{Nothing,Nothing},Tuple{String,Nothing},Tuple{String,String}}
     path = normpath(joinpath(dir, "src", "$name.jl"))
     isfile_casesensitive(path) || return nothing, nothing
@@ -410,10 +465,9 @@ end
 # return `nothing` if `name` is not found
 function explicit_project_deps_get(project_file::String, name::String, cache::TOMLCache)::Union{Nothing,UUID}
     d = parsed_toml(cache, project_file)
-    root_uuid = dummy_uuid(project_file)
     if get(d, "name", nothing)::Union{String, Nothing} === name
         uuid = get(d, "uuid", nothing)::Union{String, Nothing}
-        return uuid === nothing ? root_uuid : UUID(uuid)
+        return uuid === nothing ? dummy_uuid(project_file) : UUID(uuid)
     end
     deps = get(d, "deps", nothing)::Union{Dict{String, Any}, Nothing}
     if deps !== nothing
@@ -423,21 +477,38 @@ function explicit_project_deps_get(project_file::String, name::String, cache::TO
     return nothing
 end
 
+function explicit_project_deps_list(project_file::String, cache::TOMLCache)::Union{Nothing,Vector{PkgId}}
+    d = parsed_toml(cache, project_file)
+    list = PkgId[]
+    name = get(d, "name", nothing)::Union{String, Nothing}
+    if name !== nothing
+        uuid = get(d, "uuid", nothing)::Union{String, Nothing}
+        uuid = uuid === nothing ? dummy_uuid(project_file) : UUID(uuid)
+        push!(list, PkgId(uuid, name))
+    end
+    deps = get(d, "deps", nothing)::Union{Dict{String, Any}, Nothing}
+    if deps !== nothing
+        for (name, uuid) in deps
+            push!(list, PkgId(UUID(uuid), name))
+        end
+    end
+    return list
+end
+
 # find `where` stanza and return the PkgId for `name`
 # return `nothing` if it did not find `where` (indicating caller should continue searching)
-function explicit_manifest_deps_get(project_file::String, where::UUID, name::String, cache::TOMLCache)::Union{Nothing,PkgId}
+function explicit_manifest_deps_get(project_file::String, where::PkgId, name::String, cache::TOMLCache)::Union{Nothing,PkgId}
     manifest_file = project_file_manifest_path(project_file, cache)
     manifest_file === nothing && return nothing # manifest not found--keep searching LOAD_PATH
     d = parsed_toml(cache, manifest_file)
     found_where = false
-    found_name = false
-    for (dep_name, entries) in d
-        entries::Vector{Any}
+    entries = get(d, where.name, nothing)::Union{Vector{Any}, Nothing}
+    if entries !== nothing
         for entry in entries
             entry::Dict{String, Any}
             uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
             uuid === nothing && continue
-            if UUID(uuid) === where
+            if UUID(uuid) === where.uuid
                 found_where = true
                 # deps is either a list of names (deps = ["DepA", "DepB"]) or
                 # a table of entries (deps = {"DepA" = "6ea...", "DepB" = "55d..."}
@@ -445,7 +516,18 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
                 deps === nothing && continue
                 if deps isa Vector{String}
                     found_name = name in deps
-                    break
+                    if found_name
+                        # we have a unique name for each dep
+                        name_deps = get(d, name, nothing)::Union{Nothing, Vector{Any}}
+                        if name_deps === nothing || length(name_deps) != 1
+                            error("expected a single entry for $(repr(name)) in $(repr(project_file))")
+                        end
+                        entry = first(name_deps::Vector{Any})::Dict{String, Any}
+                        uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
+                        uuid === nothing && return nothing
+                        return PkgId(UUID(uuid), name)
+                    end
+                    break # TODO: it seems wrong that we use all of break, continue, and return nothing to handle the failure cases here
                 else
                     deps::Dict{String, Any}
                     for (dep, uuid) in deps
@@ -459,17 +541,53 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
         end
     end
     found_where || return nothing
-    found_name || return PkgId(name)
-    # Only reach here if deps was not a dict which mean we have a unique name for the dep
-    name_deps = get(d, name, nothing)::Union{Nothing, Vector{Any}}
-    if name_deps === nothing || length(name_deps) != 1
-        error("expected a single entry for $(repr(name)) in $(repr(project_file))")
-    end
-    entry = first(name_deps::Vector{Any})::Dict{String, Any}
-    uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
-    uuid === nothing && return nothing
-    return PkgId(UUID(uuid), name)
+    return PkgId(name)
 end
+
+# find `where` stanzas
+function explicit_manifest_deps_list(project_file::String, where::PkgId, cache::TOMLCache)::Union{Nothing,Vector{PkgId}}
+    manifest_file = project_file_manifest_path(project_file, cache)
+    manifest_file === nothing && return nothing # manifest not found--keep searching LOAD_PATH
+    d = parsed_toml(cache, manifest_file)
+    found_where = false
+    entries = get(d, where.name, nothing)::Union{Vector{Any}, Nothing}
+    if entries !== nothing
+        for entry in entries
+            entry::Dict{String, Any}
+            uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
+            uuid === nothing && continue
+            if UUID(uuid) === where.uuid
+                found_where = true
+                # deps is either a list of names (deps = ["DepA", "DepB"]) or
+                # a table of entries (deps = {"DepA" = "6ea...", "DepB" = "55d..."}
+                deps = get(entry, "deps", nothing)::Union{Vector{String}, Dict{String, Any}, Nothing}
+                deps === nothing && continue
+                list = [where]
+                if deps isa Vector{String}
+                    for name in deps
+                        # we have a unique name for each dep
+                        name_deps = get(d, name, nothing)::Union{Nothing, Vector{Any}}
+                        if name_deps === nothing || length(name_deps) != 1
+                            error("expected a single entry for $(repr(name)) in $(repr(project_file))")
+                        end
+                        entry = first(name_deps::Vector{Any})::Dict{String, Any}
+                        uuid = get(entry, "uuid", nothing)::Union{String, Nothing}
+                        uuid === nothing && continue
+                        push!(list, PkgId(UUID(uuid), name))
+                    end
+                else
+                    for (dep, uuid) in deps::Dict{String, Any}
+                        push!(list, PkgId(UUID(uuid::String), dep))
+                    end
+                end
+                return list
+            end
+        end
+    end
+    found_where || return nothing
+    return [where]
+end
+
 
 # find `uuid` stanza, return the corresponding path
 function explicit_manifest_uuid_path(project_file::String, pkg::PkgId, cache::TOMLCache)::Union{Nothing,String}
@@ -519,6 +637,40 @@ function implicit_project_deps_get(dir::String, name::String, cache::TOMLCache):
     return proj
 end
 
+# look for entry points accessible to names in a top-level package (no environment)
+# from an implicit environment (e.g. stdlib)
+function implicit_project_deps_list(dir::String, cache::TOMLCache)::Vector{PkgId}
+    list = PkgId[]
+    function add_path(name, project_file::Nothing)
+        push!(list, PkgId(name))
+        nothing
+    end
+    function add_path(name, project_file)
+        id = project_file_name_uuid(project_file, name, cache)
+        if id.name == name
+            push!(list, id)
+        end
+        nothing
+    end
+    for fname in readdir(dir)
+        fpath = joinpath(dir, fname)
+        s = stat(fpath)
+        isjl = endswith(fname, ".jl")
+        name = isjl ? fname[1:prevind(fname, end - 2)] : fname
+        if isjl && isfile(s)
+            add_path(name, nothing)
+        elseif isdir(s)
+            if isjl
+                path, project_file = entry_point_and_project_file_inside(fpath, name)
+                path === nothing || add_path(name, project_file)
+            end
+            path, project_file = entry_point_and_project_file_inside(fpath, fname)
+            path === nothing || add_path(fname, project_file)
+        end
+    end
+    return list
+end
+
 # look for an entry-point for `name`, check that UUID matches
 # if there's a project file, look up `name` in its deps and return that
 # otherwise return `nothing` to indicate the caller should keep searching
@@ -531,6 +683,18 @@ function implicit_manifest_deps_get(dir::String, where::PkgId, name::String, cac
     # this is the correct project, so stop searching here
     pkg_uuid = explicit_project_deps_get(project_file, name, cache)
     return PkgId(pkg_uuid, name)
+end
+
+# look for entry-point for pkg names, if if there's a project file,
+# otherwise return `nothing` to indicate the caller should keep searching
+function implicit_manifest_deps_list(dir::String, where::PkgId, cache::TOMLCache)::Union{Nothing,Vector{PkgId}}
+    @assert where.uuid !== nothing
+    project_file = entry_point_and_project_file(dir, where.name)[2]
+    project_file === nothing && return nothing # a project file is mandatory for a package with a uuid
+    proj = project_file_name_uuid(project_file, where.name, cache)
+    proj == where || return nothing # verify that this is the correct project file
+    # this is the correct project, so stop searching here
+    return explicit_project_deps_list(project_file, cache)
 end
 
 # look for an entry-point for `pkg` and return its path if UUID matches
@@ -1508,6 +1672,44 @@ function stale_cachefile(modpath::String, cachefile::String, cache::TOMLCache)
         close(io)
     end
 end
+
+
+# starting with a particular `pkg` as the root, list all packages that can possibly be loaded
+function identify_all_deps(pkg::PkgId, cache::TOMLCache = TOMLCache())
+    lists = Dict{PkgId,Vector{PkgId}}()
+    q = [pkg]
+    while !isempty(q)
+        pkg = pop!(q)
+        get!(lists, pkg) do
+            deps = identify_package_deps(pkg, cache)
+            append!(q, deps)
+            deps
+        end
+    end
+    return lists
+end
+
+# map locate_package across a list of pkgs
+function locate_all_packages(pkgs, cache::TOMLCache = TOMLCache())
+    pths = Dict{PkgId,String}()
+    for pkg in pkgs
+        pth = locate_package(pkg, cache)
+        pth === nothing || (pths[pkg] = pth)
+    end
+    return pths
+end
+
+# get a tree of the information for all loadable packages starting from a
+# particular `pkg` as the root
+function find_all_packages(pkg::PkgId, cache::TOMLCache = TOMLCache())
+    deps = identify_all_deps(pkg, cache)
+    return locate_all_packages(keys(deps), cache) => deps
+end
+find_all_packages(name::String, cache::TOMLCache = TOMLCache()) =
+    find_all_packages(PkgId(""), name, cache) # `where` without a uuid will be ignored
+find_all_packages(where::Union{Module,PkgId}, name::String, cache::TOMLCache = TOMLCache()) =
+    find_all_packages(something(identify_package(where, name, cache)), cache)
+
 
 """
     @__FILE__ -> AbstractString
