@@ -1219,7 +1219,7 @@ end
 # issue #22842
 f22842(x::UnionAll) = UnionAll
 f22842(x::DataType) = length(x.parameters)
-@test f22842(Tuple{Vararg{Int64,N} where N}) == 1
+@test f22842(Tuple{Vararg{Int64}}) == 1
 @test f22842(Tuple{Vararg{Int64,N}} where N) === UnionAll
 
 # issue #1153
@@ -7007,7 +7007,6 @@ end
 @test_throws ArgumentError Array{Int, 2}(undef, -1, -1)
 
 # issue #28812
-@test Tuple{Vararg{Array{T},3} where T} === Tuple{Array,Array,Array}
 @test Tuple{Vararg{Array{T} where T,3}} === Tuple{Array,Array,Array}
 
 # issue #29145
@@ -7508,3 +7507,11 @@ let array = Int[]
 end
 @test compare_union37557(Ref{Union{Int,Vector{Int}}}(1),
                          Ref{Union{Int,Vector{Int}}}(1))
+
+# Redfining types with Vararg
+abstract type RedefineVararg; end
+const RedefineVarargN{N} = Tuple{Vararg{RedefineVararg, N}}
+const RedefineVarargN{N} = Tuple{Vararg{RedefineVararg, N}}
+
+# NTuples with non-types
+@test NTuple{3, 2} == Tuple{2, 2, 2}
