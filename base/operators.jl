@@ -1124,6 +1124,10 @@ const ∈ = in
 ∉(x, itr) = !∈(x, itr)
 ∌(itr, x) = !∋(itr, x)
 
+∋(x)   = Fix2(∋, x)
+∉(itr) = Fix2(∉, itr)
+∌(x)   = Fix2(∌, x)
+
 """
     in(item, collection) -> Bool
     ∈(item, collection) -> Bool
