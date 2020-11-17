@@ -38,13 +38,26 @@ let
         :Unicode,
 
         # 1-depth packages
+        :CompilerSupportLibraries_jll,
         :DelimitedFiles,
+        :GMP_jll,
         :LibCURL_jll,
+        :LibOSXUnwind_jll,
+        :LibUV_jll,
+        :LibUnwind_jll,
         :LinearAlgebra,
         :Markdown,
+        :MbedTLS_jll,
+        :OpenLibm_jll,
+        :PCRE2_jll,
         :Printf,
         :Random,
         :Tar,
+        :Zlib_jll,
+        :dSFMT_jll,
+        :libLLVM_jll,
+        :nghttp2_jll,
+        :p7zip_jll,
 
         # 2-depth packages
         :Dates,
@@ -53,16 +66,21 @@ let
         :InteractiveUtils,
         :LibCURL,
         :LibGit2,
+        :LibSSH2_jll,
+        :MPFR_jll,
+        :OpenBLAS_jll,
         :Profile,
         :SparseArrays,
         :UUIDs,
 
         # 3-depth packages
         :Downloads,
+        :LibGit2_jll,
         :REPL,
         :SharedArrays,
         :Statistics,
         :SuiteSparse,
+        :SuiteSparse_jll,
         :TOML,
         :Test,
 
