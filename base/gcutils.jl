@@ -107,6 +107,19 @@ Control whether garbage collection is enabled using a boolean argument (`true` f
 enable(on::Bool) = ccall(:jl_gc_enable, Int32, (Int32,), on) != 0
 
 """
+    GC.enable_finalizers(on::Bool)
+
+Increment or decrement the counter that controls the running of finalizers on
+the current thread. Finalizers will only run when the counter is at zero. (Set
+`true` for enabling, `false` for disabling). They may still run concurrently on
+another thread.
+
+When exiting any try block, either normally or due to an exception, this may be
+reset to the previous value from entering the try block.
+"""
+enable_finalizers(on::Bool) = ccall(:jl_gc_enable_finalizers, Cvoid, (Ptr{Cvoid}, Int32,), C_NULL, on)
+
+"""
     GC.@preserve x1 x2 ... xn expr
 
 Mark the objects `x1, x2, ...` as being *in use* during the evaluation of the

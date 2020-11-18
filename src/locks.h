@@ -134,9 +134,9 @@ static inline void jl_mutex_unlock(jl_mutex_t *lock)
 {
     jl_ptls_t ptls = jl_get_ptls_states();
     jl_mutex_unlock_nogc(lock);
-    jl_gc_enable_finalizers(ptls, 1);
     jl_lock_frame_pop();
     JL_SIGATOMIC_END();
+    jl_gc_enable_finalizers(ptls, 1); // runs finalizers (may GC)
 }
 
 static inline void jl_mutex_init(jl_mutex_t *lock) JL_NOTSAFEPOINT

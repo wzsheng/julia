@@ -123,6 +123,30 @@ let l = ReentrantLock()
     @test_throws ErrorException unlock(l)
 end
 
+# Debugging tool: return the current state of the enable_finalizers counter.
+enable_finalizers_count() = ccall(:jl_gc_get_enable_finalizers, Int32, (Ptr{Cvoid},), C_NULL)
+
+let l = ReentrantLock()
+    @test enable_finalizers_count() == 0
+    @test lock(enable_finalizers_count, l) == 1
+    @test enable_finalizers_count() == 0
+    try
+        GC.enable_finalizers(false)
+        GC.enable_finalizers(false)
+        @test enable_finalizers_count() == 2
+        GC.enable_finalizers(true)
+        @test enable_finalizers_count() == 1
+    finally
+        @test enable_finalizers_count() == 0
+        GC.enable_finalizers(false)
+        @test enable_finalizers_count() == 1
+    end
+    @test enable_finalizers_count() == 1
+    GC.enable_finalizers(true)
+    @test enable_finalizers_count() == 0
+    @test_warn "WARNING: GC finalizers already enabled on this thread." GC.enable_finalizers(true)
+end
+
 # task switching
 
 @noinline function f6597(c)
