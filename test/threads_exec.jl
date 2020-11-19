@@ -112,10 +112,10 @@ test_threaded_atomic_minmax(UInt16(27000),UInt16(37000))
 function threaded_add_locked(::Type{LockT}, x, n) where LockT
     critical = LockT()
     @threads for i = 1:n
-        @test lock(critical) === nothing
+        lock(critical)
         @test islocked(critical)
         x = x + 1
-        @test unlock(critical) === nothing
+        unlock(critical)
     end
     @test !islocked(critical)
     nentered = 0
@@ -124,7 +124,7 @@ function threaded_add_locked(::Type{LockT}, x, n) where LockT
         if trylock(critical)
             @test islocked(critical)
             nentered += 1
-            @test unlock(critical) === nothing
+            unlock(critical)
         else
             atomic_add!(nfailed, 1)
         end
@@ -142,21 +142,21 @@ end
 let critical = ReentrantLock()
     @test !islocked(critical)
     @test_throws ErrorException("unlock count must match lock count") unlock(critical)
-    @test lock(critical) === nothing
+    lock(critical)
     @test islocked(critical)
-    @test lock(critical) === nothing
-    @test trylock(critical) == true
+    lock(critical)
+    t = trylock(critical); @test t
     @test islocked(critical)
-    @test unlock(critical) === nothing
+    unlock(critical)
     @test islocked(critical)
-    @test unlock(critical) === nothing
+    unlock(critical)
     @test islocked(critical)
-    @test unlock(critical) === nothing
+    unlock(critical)
     @test !islocked(critical)
     @test_throws ErrorException("unlock count must match lock count") unlock(critical)
-    @test trylock(critical) == true
+    t = trylock(critical); @test t
     @test islocked(critical)
-    @test unlock(critical) === nothing
+    unlock(critical)
     @test !islocked(critical)
     @test_throws ErrorException("unlock count must match lock count") unlock(critical)
     @test !islocked(critical)
@@ -167,10 +167,10 @@ end
 function threaded_gc_locked(::Type{LockT}) where LockT
     critical = LockT()
     @threads for i = 1:20
-        @test lock(critical) === nothing
+        lock(critical)
         @test islocked(critical)
         GC.gc(false)
-        @test unlock(critical) === nothing
+        unlock(critical)
     end
     @test !islocked(critical)
 end

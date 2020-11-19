@@ -126,7 +126,7 @@ end
 # Debugging tool: return the current state of the enable_finalizers counter.
 enable_finalizers_count() = ccall(:jl_gc_get_enable_finalizers, Int32, (Ptr{Cvoid},), C_NULL)
 
-let l = ReentrantLock()
+for l in (Threads.SpinLock(), ReentrantLock())
     @test enable_finalizers_count() == 0
     @test lock(enable_finalizers_count, l) == 1
     @test enable_finalizers_count() == 0

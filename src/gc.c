@@ -411,7 +411,12 @@ JL_DLLEXPORT void jl_gc_enable_finalizers(jl_ptls_t ptls, int on)
         }
         JL_CATCH {
             jl_printf((JL_STREAM*)STDERR_FILENO, "WARNING: GC finalizers already enabled on this thread. Possibly unpaired within a try block?\n");
-            jlbacktrace(); // written to STDERR_FILENO
+            // Only print the backtrace once, to avoid spamming the logs
+            static int backtrace_printed = 0;
+            if (backtrace_printed == 0) {
+                backtrace_printed = 1;
+                jlbacktrace(); // written to STDERR_FILENO
+            }
         }
         return;
     }

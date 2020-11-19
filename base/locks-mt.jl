@@ -87,6 +87,7 @@ function trylock(l::SpinLock)
 end
 
 function unlock(l::SpinLock)
+    _get(l) == 0 && error("unlock count must match lock count")
     _set!(l, 0)
     GC.enable_finalizers(true)
     ccall(:jl_cpu_wake, Cvoid, ())
