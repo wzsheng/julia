@@ -286,7 +286,7 @@ This function may be useful in concert with the `windows_verbatim` flag to
 Alternatively, the argument can be passed as an environment variable, which
 avoids the problem with `%` and the `windows_verbatim` flag:
 
-```
+```julia
 cmdargs = shell_escape_wincmd("Passing args with %cmdargs% works 100%!")
 run(setenv(`cmd /C to_run %cmdargs%`, "cmdargs" => cmdargs))
 ```
@@ -302,9 +302,9 @@ run(setenv(`cmd /C to_run %cmdargs%`, "cmdargs" => cmdargs))
     `shell_escape_wincmd` applied twice since it will be parsed twice by CMD.
     This implies ENV variables would also be expanded twice!
     For example:
-    ```
+    ```julia
     to_print = "All for 1 & 1 for all!"
-    run(Cmd(Cmd(["cmd /S /C \" break | echo \$(shell_escape_wincmd(shell_escape_wincmd(to_print))) \""]), windows_verbatim=true))
+    run(Cmd(Cmd(["cmd", "/S /C \" break | echo \$(shell_escape_wincmd(shell_escape_wincmd(to_print))) \""]), windows_verbatim=true))
     ```
 
 With an I/O stream parameter `io`, the result will be written there,
