@@ -2889,6 +2889,8 @@ end
         @eval M.g(2, 3.0)
     end
     @test length(flatten_times(timing2)) < length(flatten_times(timing1))
+    # Test the stacktrace
+    @test isa(stacktrace(timing1.children[1].bt), Vector{Base.StackTraces.StackFrame})
 
     # Recursive function
     @eval module _Recursive f(n::Integer) = n == 0 ? 0 : f(n-1) + 1 end
@@ -2919,4 +2921,3 @@ f37943(x::Any, i::Int) = getfield((x::Pair{false, Int}), i)
 g37943(i::Int) = fieldtype(Pair{false, T} where T, i)
 @test only(Base.return_types(f37943, Tuple{Any, Int})) === Union{}
 @test only(Base.return_types(g37943, Tuple{Int})) === Union{Type{Union{}}, Type{Any}}
-
