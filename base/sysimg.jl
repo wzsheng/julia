@@ -41,7 +41,6 @@ let
         :CompilerSupportLibraries_jll,
         :DelimitedFiles,
         :GMP_jll,
-        :LibCURL_jll,
         :LibOSXUnwind_jll,
         :LibUV_jll,
         :LibUnwind_jll,
@@ -64,7 +63,6 @@ let
         :Distributed,
         :Future,
         :InteractiveUtils,
-        :LibCURL,
         :LibGit2,
         :LibSSH2_jll,
         :MPFR_jll,
@@ -74,7 +72,7 @@ let
         :UUIDs,
 
         # 3-depth packages
-        :Downloads,
+        :LibCURL_jll,
         :LibGit2_jll,
         :REPL,
         :SharedArrays,
@@ -85,9 +83,15 @@ let
         :Test,
 
         # 4-depth packages
-        :Pkg,
+        :LibCURL,
 
         # 5-depth packages
+        :Downloads,
+
+        # 6-depth packages
+        :Pkg,
+
+        # 7-depth packages
         :LazyArtifacts,
     ]
     maxlen = reduce(max, textwidth.(string.(stdlibs)); init=0)
