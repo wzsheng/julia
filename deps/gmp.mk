@@ -46,11 +46,6 @@ endif
 
 define GMP_INSTALL
 	mkdir -p $2/$(build_shlibdir) $2/$(build_includedir)
-	# Ensure that Windows gets the non-versioned dll names too
-ifeq ($(BUILD_OS),WINNT)
-	-cp $1/.libs/libgmp-*.dll $1/.libs/libgmp.dll
-	-cp $1/.libs/libgmpxx-*.dll $1/.libs/libgmpxx.dll
-endif
 	$(INSTALL_M) $1/.libs/libgmp*$(SHLIB_EXT)* $2/$(build_shlibdir)
 	$(INSTALL_F) $1/gmp.h $2/$(build_includedir)
 endef
