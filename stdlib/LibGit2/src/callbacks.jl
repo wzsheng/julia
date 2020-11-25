@@ -359,19 +359,131 @@ function fetchhead_foreach_callback(ref_name::Cstring, remote_url::Cstring,
     return Cint(0)
 end
 
+function verify_host_error(message::AbstractString)
+    printstyled(stderr, "$message\n", color = :cyan, bold = true)
+end
+
 function certificate_callback(
     cert_p :: Ptr{Cvoid},
     valid  :: Cint,
     host_p :: Ptr{Cchar},
-    user_p :: Ptr{Cvoid},
+    data_p :: Ptr{Cvoid},
 )::Cint
     valid != 0 && return Consts.CERT_ACCEPT
     host = unsafe_string(host_p)
     cert_type = unsafe_load(convert(Ptr{Cint}, cert_p))
     transport = cert_type == Consts.CERT_TYPE_TLS ? "TLS" :
                 cert_type == Consts.CERT_TYPE_SSH ? "SSH" : nothing
-    verify = NetworkOptions.verify_host(host, transport)
-    verify ? Consts.PASSTHROUGH : Consts.CERT_ACCEPT
+    if !NetworkOptions.verify_host(host, transport)
+        # user has opted out of host verification
+        return Consts.CERT_ACCEPT
+    end
+    if transport == "TLS"
+        # TLS verification is done before the callback
+        # so if we get here, host verification failed
+        verify_host_error("TLS host verification: the identity of the server `$host` could not be verified. Someone could be trying to man-in-the-middle your connection. It is also possible that the correct server is using an invalid certificate or that your system's certificate authority root store is misconfigured.")
+        return Consts.CERT_REJECT
+    end
+    if transport == "SSH"
+        # SSH verification has to be done here
+        known = ssh_knownhost_check(host, cert_p)
+        # appropriate warning already emitted (if any)
+        return known ? Consts.CERT_ACCEPT : Consts.CERT_REJECT
+    end
+    # unclear what other transports can occur here, but they may
+    # not default to secure, so we should reject anything unknown
+    return Consts.CERT_REJECT
+end
+
+# SSH known host checking
+struct CertHostKey
+    parent :: Cint
+    mask   :: Cint
+    md5    :: NTuple{16,UInt8}
+    sha1   :: NTuple{20,UInt8}
+    sha256 :: NTuple{32,UInt8}
+end
+
+struct KnownHost
+    magic :: Cuint
+    node  :: Ptr{Cvoid}
+    name  :: Ptr{Cchar}
+    key   :: Ptr{Cchar}
+    type  :: Cint
+end
+
+function ssh_knownhost_check(host::AbstractString, key_hashes_p::Ptr{Cvoid})
+    key_hashes = unsafe_load(convert(Ptr{CertHostKey}, key_hashes_p))
+    if key_hashes.mask & (Consts.CERT_SSH_SHA1 | Consts.CERT_SSH_SHA256) == 0
+        verify_host_error("SSH host verification: no secure certificate hash available for `$host`, cannot verify server identity.")
+        return false
+    end
+    session = @ccall libssh2_session_init_ex(
+        C_NULL :: Ptr{Cvoid},
+        C_NULL :: Ptr{Cvoid},
+        C_NULL :: Ptr{Cvoid},
+        C_NULL :: Ptr{Cvoid},
+    ) :: Ptr{Cvoid}
+    files = [joinpath(homedir(), ".ssh", "known_hosts")]
+    for file in files
+        ispath(file) || continue
+        hosts = @ccall libssh2_knownhost_init(
+            session::Ptr{Cvoid},
+        ) :: Ptr{Cvoid}
+        count = @ccall libssh2_knownhost_readfile(
+            hosts :: Ptr{Cvoid},
+            file  :: Cstring,
+            1     :: Cint, # standard OpenSSH format
+        ) :: Cint
+        if count < 0
+            @warn("Error parsing SSH known hosts file `$file`")
+            @ccall libssh2_knownhost_free(hosts::Ptr{Cvoid})::Cvoid
+            continue
+        end
+        # We can't use libssh2_knownhost_check the normal way because libgit2,
+        # for no good reason, doesn't give us the fingerprint that we can use
+        # for that and instead gives us multiple hashes of that fingerprint.
+        # Instead, we have to look up the host with an incorrect fingerprint and
+        # then compute hashes of that to compare to what the callback gets from
+        # libgit2's pointlessly unhelpful API. Y U NO GIVE FINGERPRINT?
+        type = Consts.LIBSSH2_KNOWNHOST_TYPE_PLAIN |
+               Consts.LIBSSH2_KNOWNHOST_KEYENC_BASE64
+        hostr = Ref{Ptr{KnownHost}}()
+        check = @ccall libssh2_knownhost_check(
+            hosts :: Ptr{Cvoid},
+            host  :: Cstring,
+            ""    :: Ptr{UInt8},
+            0     :: Csize_t,
+            type  :: Cint,
+            hostr :: Ptr{Ptr{KnownHost}},
+        ) :: Cint
+        if check == Consts.LIBSSH2_KNOWNHOST_CHECK_NOTFOUND
+            # nothing relevant, try the next file
+            @ccall libssh2_knownhost_free(hosts::Ptr{Cvoid})::Cvoid
+            continue
+        elseif check == Consts.LIBSSH2_KNOWNHOST_CHECK_FAILURE
+            @warn("Error searching SSH known hosts file `$file`")
+            @ccall libssh2_knownhost_free(hosts::Ptr{Cvoid})::Cvoid
+            continue
+        end
+        @assert check == Consts.LIBSSH2_KNOWNHOST_CHECK_MISMATCH
+        # got a known hosts record for host, now check its key hash
+        key = base64decode(unsafe_string(unsafe_load(hostr[]).key))
+        match = true # avaliable hashes must match & there's at least one
+        if key_hashes.mask & Consts.CERT_SSH_SHA1 != 0
+            match &= sha1(key) == collect(key_hashes.sha1)
+        end
+        if key_hashes.mask & Consts.CERT_SSH_SHA256 != 0
+            match &= sha256(key) == collect(key_hashes.sha256)
+        end
+        match || verify_host_error("SSH host verification: the identity of the server `$host` does not match its known hosts record. Someone could be trying to man-in-the-middle your connection. It is also possible that the server has changed its key, in which case you should check with the server administrator and use `ssh $host` to login into the server and update your known hosts file.")
+        @ccall libssh2_knownhost_free(hosts::Ptr{Cvoid})::Cvoid
+        @assert 0 == @ccall libssh2_session_free(session::Ptr{Cvoid})::Cint
+        return match
+    end
+    verify_host_error("SSH host verification: the server `$host` is not a known host. Please connect once using `ssh $host` in order to add the server to your known hosts file.")
+    @assert 0 == @ccall libssh2_session_free(session::Ptr{Cvoid})::Cint
+    return false
 end
 
 "C function pointer for `mirror_callback`"

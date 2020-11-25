@@ -7,7 +7,9 @@ module LibGit2
 
 import Base: ==
 using Base: something, notnothing
+using Base64: base64decode
 using Printf: @printf
+using SHA: sha256, sha1
 import NetworkOptions
 
 export with, GitRepo, GitConfig
