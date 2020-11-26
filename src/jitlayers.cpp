@@ -701,6 +701,12 @@ void JuliaOJIT::addGlobalMapping(StringRef Name, uint64_t Addr)
 void JuliaOJIT::addModule(std::unique_ptr<Module> M)
 {
     JL_TIMING(LLVM_MODULE_FINISH);
+    std::vector<std::string> NewExports;
+    for (auto &F : M->functions()) {
+        if (!F.isDeclaration() && F.getLinkage() == GlobalValue::ExternalLinkage) {
+            NewExports.push_back(getMangledName(F.getName()));
+        }
+    }
 #ifndef JL_NDEBUG
     // validate the relocations for M
     for (Module::global_object_iterator I = M->global_objects().begin(), E = M->global_objects().end(); I != E; ) {
@@ -724,6 +730,13 @@ void JuliaOJIT::addModule(std::unique_ptr<Module> M)
     auto key = ES.allocateVModule();
     // TODO: what is the performance characteristics of this?
     cantFail(CompileLayer.add(JD, orc::ThreadSafeModule(std::move(M), TSCtx), key));
+    // force eager compilation (for now), due to memory management specifics
+    // (can't handle compilation recursion)
+    for (auto Name : NewExports) {
+        auto Sym = ES.lookup({&JD}, Name);
+        (void)*Sym;
+    }
+
 }
 
 void JuliaOJIT::removeModule(ModuleHandleT H)
